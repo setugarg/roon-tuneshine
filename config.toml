@@ -1,0 +1,40 @@
+# roon-tuneshine configuration
+# All settings are optional — the app auto-discovers both Roon and Tuneshine on your LAN.
+
+[roon]
+# host = "192.168.1.10"   # IP of Roon Core. Leave commented to auto-discover.
+# port = 9100              # Roon Core port. Leave commented to auto-discover.
+# core_id = ""             # Specific core ID to target (useful if multiple cores exist).
+
+# Path where the Roon auth token is persisted between runs.
+token_file = "~/.roon-tuneshine-token"
+
+# Only watch these zone names. Empty list = watch ALL zones.
+# First zone to start playing wins (useful for multi-zone setups).
+# zone_filter = ["Living Room", "Office"]
+zone_filter = []
+
+[tuneshine]
+# host = "tuneshine-abcd.local"  # mDNS hostname or IP. Leave commented to auto-discover.
+# port = 80                       # HTTP port. Leave commented (default 80).
+
+# Seconds between checking Tuneshine availability when it was last offline.
+offline_retry_interval = 30
+
+[image]
+# Size of artwork sent to Tuneshine. The device display is 64×64 but Roon can serve
+# any size; larger = more bandwidth for the same result.
+width = 128
+height = 128
+scale = "fit"   # fit | fill | stretch
+
+[behaviour]
+# Clear the Tuneshine display when Roon stops playing.
+clear_on_stop = true
+
+# How long (seconds) to wait before clearing after playback stops.
+# Gives a grace period for track changes.
+clear_delay = 3
+
+# Log level: DEBUG | INFO | WARNING | ERROR
+log_level = "INFO"
