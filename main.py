@@ -13,6 +13,12 @@ import sys
 import time
 from pathlib import Path
 
+try:
+    from setproctitle import setproctitle
+    setproctitle("roon-tuneshine")
+except ImportError:
+    pass
+
 # ---------------------------------------------------------------------------
 # Config loading (tomllib stdlib in 3.11+, else tomli third-party)
 # ---------------------------------------------------------------------------

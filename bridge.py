@@ -82,6 +82,8 @@ class Bridge:
             artist_name=artist or None,
             album_name=album or None,
             zone_name=zone_name or None,
+            image_width=self._image_width,
+            image_height=self._image_height,
         )
 
     def _handle_stopped(self) -> None:

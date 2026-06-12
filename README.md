@@ -81,7 +81,7 @@ launchctl unload ~/Library/LaunchAgents/com.github.roon-tuneshine.plist
 3. **Zone subscription** — subscribes to `zones_changed` events. When a zone starts playing, the `now_playing.image_key` is extracted.
 4. **Artwork URL** — the Roon Core serves artwork at a local HTTP endpoint; `roonapi.get_image()` builds the URL.
 5. **Tuneshine discovery** — uses mDNS (`_tuneshine._tcp`) to find the device automatically.
-6. **Push** — sends the artwork URL to the Tuneshine local HTTP API. If the URL is unchanged (same track), no redundant requests are made.
+6. **Push** — downloads the artwork on your Mac, converts it to a 64×64 WebP with Pillow, and uploads the binary directly to Tuneshine. This avoids the ~30-second delay that occurs when the device fetches the image itself over the network.
 7. **Clear** — when playback stops (with a configurable grace period), the API-provided image is removed so the device returns to its default display.
 
 ## Troubleshooting
@@ -97,6 +97,9 @@ Open Roon → Settings → Extensions. If the entry doesn't appear, check firewa
 
 **Images not updating**
 Enable `DEBUG` logging (`log_level = "DEBUG"` in config) and check the output for `image_key` values. Some radio streams don't provide artwork.
+
+**`websocket-client` version conflict**
+`roonapi` 0.1.6 was written for `websocket-client < 1.0`. If you see `AttributeError` tracebacks from `roonapisocket.py`, apply the patch in [PATCHES.md](PATCHES.md).
 
 ## License
 

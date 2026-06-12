@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import json
 import logging
 import socket
 import time
@@ -23,6 +25,25 @@ def _resolve_ipv4(hostname: str) -> str:
     except socket.gaierror:
         pass
     return hostname
+def _fetch_as_webp(url: str, width: int = 64, height: int = 64) -> Optional[bytes]:
+    """Download image from *url* and return it as a WebP-encoded bytes object."""
+    try:
+        from PIL import Image
+    except ImportError:
+        logger.warning("Pillow not installed — falling back to URL push (pip install Pillow)")
+        return None
+    try:
+        resp = requests.get(url, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        img = Image.open(io.BytesIO(resp.content)).convert("RGBA").resize((width, height))
+        buf = io.BytesIO()
+        img.save(buf, "WEBP")
+        return buf.getvalue()
+    except Exception as exc:
+        logger.warning("Failed to fetch/convert image: %s", exc)
+        return None
+
+
 DEFAULT_PORT = 80
 CONNECT_TIMEOUT = 3
 REQUEST_TIMEOUT = 8
@@ -123,11 +144,13 @@ class TuneshineClient:
         album_name: Optional[str] = None,
         zone_name: Optional[str] = None,
         service_name: str = "Roon",
+        image_width: int = 64,
+        image_height: int = 64,
     ) -> bool:
         """
-        Tell Tuneshine to fetch and display artwork at *image_url*.
+        Download artwork, convert to WebP, and push binary directly to Tuneshine.
 
-        Sends track metadata alongside so the Tuneshine app can display it.
+        Falls back to URL-based push if Pillow is not installed.
         Returns True on success.
         """
         if not self.ensure_connected():
@@ -136,25 +159,33 @@ class TuneshineClient:
         if image_url == self._current_image_url:
             return True  # same track, nothing to do
 
-        body: dict = {
-            "imageUrl": image_url,
-            "serviceName": service_name,
-        }
+        webp_bytes = _fetch_as_webp(image_url, image_width, image_height)
+
+        metadata: dict = {"serviceName": service_name, "imageUrl": image_url}
         if track_name:
-            body["trackName"] = track_name
+            metadata["trackName"] = track_name
         if artist_name:
-            body["artistName"] = artist_name
+            metadata["artistName"] = artist_name
         if album_name:
-            body["albumName"] = album_name
+            metadata["albumName"] = album_name
         if zone_name:
-            body["zoneName"] = zone_name
+            metadata["zoneName"] = zone_name
 
         try:
-            resp = requests.post(
-                self._url("/image"),
-                json=body,
-                timeout=REQUEST_TIMEOUT,
-            )
+            if webp_bytes is not None:
+                resp = requests.post(
+                    self._url("/image"),
+                    files={"image": ("artwork.webp", webp_bytes, "image/webp")},
+                    data={"metadata": json.dumps(metadata)},
+                    timeout=REQUEST_TIMEOUT,
+                )
+            else:
+                # Fallback: let the device fetch the image itself
+                resp = requests.post(
+                    self._url("/image"),
+                    json=metadata,
+                    timeout=REQUEST_TIMEOUT,
+                )
             resp.raise_for_status()
             self._current_image_url = image_url
             logger.debug("Pushed image to Tuneshine: %s", image_url)
