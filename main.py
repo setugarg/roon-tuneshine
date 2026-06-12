@@ -8,10 +8,26 @@ Usage:
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import time
 from pathlib import Path
+
+PID_FILE = Path("/tmp/roon-tuneshine.pid")
+
+
+def _check_single_instance() -> None:
+    """Exit immediately if another instance is already running."""
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text().strip())
+            os.kill(pid, 0)  # signal 0 = check existence only
+            sys.exit(f"ERROR: roon-tuneshine is already running (PID {pid}). "
+                     "Stop it first or delete {PID_FILE}.")
+        except (ProcessLookupError, PermissionError):
+            pass  # stale pid file — previous run crashed
+    PID_FILE.write_text(str(os.getpid()))
 
 try:
     from setproctitle import setproctitle
@@ -53,6 +69,8 @@ def _setup_logging(level_str: str) -> None:
 
 
 def main() -> None:
+    _check_single_instance()
+
     parser = argparse.ArgumentParser(description="Roon → Tuneshine artwork bridge")
     parser.add_argument(
         "--config",
@@ -104,6 +122,7 @@ def main() -> None:
     def _shutdown(signum, frame):
         logger.info("Shutting down…")
         bridge.stop()
+        PID_FILE.unlink(missing_ok=True)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
