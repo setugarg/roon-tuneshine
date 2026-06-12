@@ -42,7 +42,7 @@ class RoonClient:
 
     def __init__(
         self,
-        on_now_playing: Callable[[NowPlayingInfo, "RoonApi"], None],
+        on_now_playing: Callable[[NowPlayingInfo, dict, "RoonApi"], None],
         on_stopped: Callable[[], None],
         host: Optional[str] = None,
         port: Optional[int] = None,
@@ -140,7 +140,7 @@ class RoonClient:
                              zone.get("display_name"),
                              np.get("one_line", {}).get("line1", ""),
                              np.get("two_line", {}).get("line1", ""))
-                self._on_now_playing(np, self._api)
+                self._on_now_playing(np, zone, self._api)
 
         # Detect zones that stopped
         stopped = self._playing_zone_ids - playing_ids

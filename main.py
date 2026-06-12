@@ -76,7 +76,7 @@ def main() -> None:
 
     # Placeholder callbacks — Bridge replaces them after construction
     roon = RoonClient(
-        on_now_playing=lambda np, api: None,
+        on_now_playing=lambda np, zone, api: None,
         on_stopped=lambda: None,
         host=roon_cfg.get("host"),
         port=roon_cfg.get("port"),

@@ -1,0 +1,17 @@
+{
+  "name": "roon-tuneshine",
+  "version": "1.0.0",
+  "description": "A small Python bridge that watches your Roon playback and pushes album artwork to a [Tuneshine](https://tuneshine.rocks) device in real time.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "node-roon-api": "github:RoonLabs/node-roon-api",
+    "node-roon-api-image": "github:RoonLabs/node-roon-api-image",
+    "node-roon-api-transport": "github:RoonLabs/node-roon-api-transport"
+  }
+}

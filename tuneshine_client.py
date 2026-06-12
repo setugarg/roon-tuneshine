@@ -12,29 +12,45 @@ import requests
 logger = logging.getLogger(__name__)
 
 MDNS_SERVICE = "_tuneshine._tcp.local."
+
+
+def _resolve_ipv4(hostname: str) -> str:
+    """Return IPv4 address for *hostname*, avoiding IPv6 for .local mDNS names."""
+    try:
+        results = socket.getaddrinfo(hostname, None, socket.AF_INET)
+        if results:
+            return results[0][4][0]
+    except socket.gaierror:
+        pass
+    return hostname
 DEFAULT_PORT = 80
 CONNECT_TIMEOUT = 3
-REQUEST_TIMEOUT = 5
+REQUEST_TIMEOUT = 8
 
 
-def _discover_via_mdns(timeout: float = 8.0) -> Optional[tuple[str, int]]:
-    """Return (host, port) of first Tuneshine found via mDNS, or None."""
+def _discover_via_mdns(timeout: float = 10.0) -> Optional[tuple[str, int]]:
+    """Return (host, port) of the first Tuneshine found via mDNS, or None."""
     try:
-        from zeroconf import ServiceBrowser, Zeroconf  # type: ignore
+        from zeroconf import ServiceBrowser, ServiceStateChange, Zeroconf  # type: ignore
     except ImportError:
-        logger.warning("zeroconf not installed — mDNS discovery unavailable. "
-                       "Install with: pip install zeroconf")
+        logger.warning(
+            "zeroconf not installed — mDNS discovery unavailable. "
+            "Install with: pip install zeroconf"
+        )
         return None
 
     found: list[tuple[str, int]] = []
 
     class _Listener:
-        def add_service(self, zc: "Zeroconf", type_: str, name: str) -> None:  # noqa: D102
+        def add_service(self, zc: "Zeroconf", type_: str, name: str) -> None:
             info = zc.get_service_info(type_, name)
-            if info:
-                addr = socket.inet_ntoa(info.addresses[0])
+            if info and info.addresses:
+                try:
+                    addr = socket.inet_ntoa(info.addresses[0])
+                except Exception:
+                    addr = info.server  # fall back to hostname
                 port = info.port or DEFAULT_PORT
-                logger.debug("mDNS found Tuneshine: %s:%s", addr, port)
+                logger.debug("mDNS discovered Tuneshine: %s:%s (%s)", addr, port, name)
                 found.append((addr, port))
 
         def remove_service(self, *_):
@@ -53,7 +69,7 @@ def _discover_via_mdns(timeout: float = 8.0) -> Optional[tuple[str, int]]:
 
 
 class TuneshineClient:
-    """Thin wrapper around the Tuneshine local HTTP API."""
+    """Wrapper around the Tuneshine local HTTP API (firmware 2.3.0+)."""
 
     def __init__(
         self,
@@ -65,7 +81,7 @@ class TuneshineClient:
         self._port = port or DEFAULT_PORT
         self._offline_retry_interval = offline_retry_interval
         self._online = False
-        self._last_offline_check = 0.0
+        self._last_offline_check = -offline_retry_interval  # allow immediate first attempt
         self._current_image_url: Optional[str] = None
 
     # ------------------------------------------------------------------
@@ -88,34 +104,60 @@ class TuneshineClient:
                 self._host, self._port = result
                 logger.info("Tuneshine discovered at %s:%s", self._host, self._port)
             else:
-                logger.warning("Tuneshine not found via mDNS. Will retry in %ss.",
-                               self._offline_retry_interval)
+                logger.warning(
+                    "Tuneshine not found via mDNS. Will retry in %ss.",
+                    self._offline_retry_interval,
+                )
                 return False
 
+        # Resolve hostname → IPv4 (avoids IPv6 failures on .local names)
+        self._host = _resolve_ipv4(self._host)
         self._online = self._ping()
         return self._online
 
-    def push_image_url(self, url: str) -> bool:
+    def push_image(
+        self,
+        image_url: str,
+        track_name: Optional[str] = None,
+        artist_name: Optional[str] = None,
+        album_name: Optional[str] = None,
+        zone_name: Optional[str] = None,
+        service_name: str = "Roon",
+    ) -> bool:
         """
-        Tell Tuneshine to display artwork at *url*.
+        Tell Tuneshine to fetch and display artwork at *image_url*.
 
+        Sends track metadata alongside so the Tuneshine app can display it.
         Returns True on success.
         """
         if not self.ensure_connected():
             return False
 
-        if url == self._current_image_url:
-            return True  # nothing to do
+        if image_url == self._current_image_url:
+            return True  # same track, nothing to do
+
+        body: dict = {
+            "imageUrl": image_url,
+            "serviceName": service_name,
+        }
+        if track_name:
+            body["trackName"] = track_name
+        if artist_name:
+            body["artistName"] = artist_name
+        if album_name:
+            body["albumName"] = album_name
+        if zone_name:
+            body["zoneName"] = zone_name
 
         try:
             resp = requests.post(
-                self._base_url("/api/image/url"),
-                json={"url": url},
+                self._url("/image"),
+                json=body,
                 timeout=REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
-            self._current_image_url = url
-            logger.debug("Pushed image URL to Tuneshine: %s", url)
+            self._current_image_url = image_url
+            logger.debug("Pushed image to Tuneshine: %s", image_url)
             return True
         except requests.RequestException as exc:
             logger.warning("Failed to push image to Tuneshine: %s", exc)
@@ -123,18 +165,15 @@ class TuneshineClient:
             return False
 
     def clear_image(self) -> bool:
-        """Remove the current API-provided image from Tuneshine."""
+        """Remove the locally-provided image, reverting Tuneshine to its idle display."""
         if not self.ensure_connected():
             return False
 
         if self._current_image_url is None:
-            return True
+            return True  # already clear
 
         try:
-            resp = requests.delete(
-                self._base_url("/api/image"),
-                timeout=REQUEST_TIMEOUT,
-            )
+            resp = requests.delete(self._url("/image"), timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
             self._current_image_url = None
             logger.debug("Cleared Tuneshine image")
@@ -145,11 +184,11 @@ class TuneshineClient:
             return False
 
     def get_state(self) -> Optional[dict]:
-        """Return the raw /state response dict, or None on error."""
+        """Return the raw /state dict, or None on error."""
         if not self.ensure_connected():
             return None
         try:
-            resp = requests.get(self._base_url("/state"), timeout=REQUEST_TIMEOUT)
+            resp = requests.get(self._url("/state"), timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
             return resp.json()
         except requests.RequestException as exc:
@@ -158,15 +197,15 @@ class TuneshineClient:
             return None
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Internal
     # ------------------------------------------------------------------
 
-    def _base_url(self, path: str) -> str:
+    def _url(self, path: str) -> str:
         return f"http://{self._host}:{self._port}{path}"
 
     def _ping(self) -> bool:
         try:
-            resp = requests.get(self._base_url("/state"), timeout=CONNECT_TIMEOUT)
+            resp = requests.get(self._url("/health"), timeout=CONNECT_TIMEOUT)
             return resp.status_code < 500
         except requests.RequestException:
             return False
@@ -175,5 +214,4 @@ class TuneshineClient:
         self._online = False
         self._current_image_url = None
         self._last_offline_check = time.monotonic()
-        logger.info("Tuneshine marked offline. Will retry in %ss.",
-                    self._offline_retry_interval)
+        logger.info("Tuneshine marked offline. Will retry in %ss.", self._offline_retry_interval)

@@ -41,7 +41,7 @@ class Bridge:
         self._clear_timer: Optional[threading.Timer] = None
 
     def start(self) -> None:
-        self._roon._on_now_playing = self._handle_now_playing
+        self._roon._on_now_playing = self._handle_now_playing  # type: ignore[assignment]
         self._roon._on_stopped = self._handle_stopped
         self._roon.connect()
         logger.info("Bridge running. Watching Roon for playback…")
@@ -52,7 +52,7 @@ class Bridge:
 
     # ------------------------------------------------------------------
 
-    def _handle_now_playing(self, now_playing: dict, api: RoonApi) -> None:
+    def _handle_now_playing(self, now_playing: dict, zone: dict, api: RoonApi) -> None:
         self._cancel_clear_timer()
 
         image_key = now_playing.get("image_key")
@@ -67,11 +67,22 @@ class Bridge:
             height=self._image_height,
         )
 
-        track = now_playing.get("two_line", {}).get("line1", "?")
-        artist = now_playing.get("two_line", {}).get("line2", "")
+        two_line = now_playing.get("two_line", {})
+        three_line = now_playing.get("three_line", {})
+        track = two_line.get("line1") or three_line.get("line1", "")
+        artist = two_line.get("line2") or three_line.get("line2", "")
+        album = three_line.get("line3", "")
+        zone_name = zone.get("display_name", "")
+
         logger.info("Now playing: %s — %s → pushing artwork", track, artist)
 
-        self._tuneshine.push_image_url(url)
+        self._tuneshine.push_image(
+            image_url=url,
+            track_name=track or None,
+            artist_name=artist or None,
+            album_name=album or None,
+            zone_name=zone_name or None,
+        )
 
     def _handle_stopped(self) -> None:
         if not self._clear_on_stop:
