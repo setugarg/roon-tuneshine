@@ -99,6 +99,7 @@ class TuneshineClient:
         offline_retry_interval: int = 30,
     ) -> None:
         self._host = host
+        self._host_pinned = host is not None  # True = user set it in config, don't re-discover
         self._port = port or DEFAULT_PORT
         self._offline_retry_interval = offline_retry_interval
         self._online = False
@@ -245,4 +246,6 @@ class TuneshineClient:
         self._online = False
         self._current_image_url = None
         self._last_offline_check = time.monotonic()
+        if not self._host_pinned:
+            self._host = None  # force mDNS re-discovery in case IP changed
         logger.info("Tuneshine marked offline. Will retry in %ss.", self._offline_retry_interval)

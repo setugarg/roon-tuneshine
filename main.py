@@ -24,7 +24,7 @@ def _check_single_instance() -> None:
             pid = int(PID_FILE.read_text().strip())
             os.kill(pid, 0)  # signal 0 = check existence only
             sys.exit(f"ERROR: roon-tuneshine is already running (PID {pid}). "
-                     "Stop it first or delete {PID_FILE}.")
+                     f"Stop it first or delete {PID_FILE}.")
         except (ProcessLookupError, PermissionError):
             pass  # stale pid file — previous run crashed
     PID_FILE.write_text(str(os.getpid()))

@@ -76,15 +76,22 @@ class Bridge:
 
         logger.info("Now playing: %s — %s → pushing artwork", track, artist)
 
-        self._tuneshine.push_image(
-            image_url=url,
-            track_name=track or None,
-            artist_name=artist or None,
-            album_name=album or None,
-            zone_name=zone_name or None,
-            image_width=self._image_width,
-            image_height=self._image_height,
-        )
+        # Run the push in a background thread — downloading + uploading images
+        # can take 1-3s, which would block the Roon websocket callback thread
+        # and cause Roon to drop the connection.
+        threading.Thread(
+            target=self._tuneshine.push_image,
+            kwargs=dict(
+                image_url=url,
+                track_name=track or None,
+                artist_name=artist or None,
+                album_name=album or None,
+                zone_name=zone_name or None,
+                image_width=self._image_width,
+                image_height=self._image_height,
+            ),
+            daemon=True,
+        ).start()
 
     def _handle_stopped(self) -> None:
         if not self._clear_on_stop:
