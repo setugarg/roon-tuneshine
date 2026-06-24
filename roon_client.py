@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -18,7 +19,7 @@ APP_INFO = {
     "display_version": "1.0.0",
     "publisher": "roon-tuneshine",
     "email": "",
-    "website": "https://github.com/setugarg/roon-tuneshine",
+    "website": "https://github.com/YOUR_USERNAME/roon-tuneshine",
 }
 
 NowPlayingInfo = dict  # zone sub-dict from roonapi
@@ -74,13 +75,34 @@ class RoonClient:
         else:
             logger.info("No saved token — Roon will prompt for extension approval in the app.")
 
-        self._api = RoonApi(
-            appinfo=APP_INFO,
-            token=token,
-            host=host,
-            port=int(port),
-            blocking_init=True,
-        )
+        # blocking_init=True hangs forever if Roon is down. Run it in a thread
+        # so we can log progress and bail if the process is killed via signal.
+        self._api = None
+        exc_box: list = []
+
+        def _init():
+            try:
+                self._api = RoonApi(
+                    appinfo=APP_INFO,
+                    token=token,
+                    host=host,
+                    port=int(port),
+                    blocking_init=True,
+                )
+            except Exception as e:
+                exc_box.append(e)
+
+        t = threading.Thread(target=_init, daemon=True)
+        t.start()
+        dots = 0
+        while t.is_alive():
+            t.join(timeout=5)
+            if t.is_alive():
+                dots += 1
+                if dots % 6 == 0:  # every 30s
+                    logger.info("Still waiting for Roon auth… (is Roon running?)")
+        if exc_box:
+            raise exc_box[0]
 
         if self._api.token and self._api.token != token:
             _save_token(self._token_file, self._api.token)

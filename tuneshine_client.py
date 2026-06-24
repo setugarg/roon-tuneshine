@@ -25,8 +25,11 @@ def _resolve_ipv4(hostname: str) -> str:
     except socket.gaierror:
         pass
     return hostname
-def _fetch_as_webp(url: str, width: int = 64, height: int = 64) -> Optional[bytes]:
-    """Download image from *url* and return it as a WebP-encoded bytes object."""
+TUNESHINE_IMAGE_SIZE = 64  # Tuneshine API requires exactly 64x64 WebP
+
+
+def _fetch_as_webp(url: str) -> Optional[bytes]:
+    """Download image from *url* and return it as a 64x64 WebP-encoded bytes object."""
     try:
         from PIL import Image
     except ImportError:
@@ -35,7 +38,9 @@ def _fetch_as_webp(url: str, width: int = 64, height: int = 64) -> Optional[byte
     try:
         resp = requests.get(url, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
-        img = Image.open(io.BytesIO(resp.content)).convert("RGBA").resize((width, height))
+        img = Image.open(io.BytesIO(resp.content)).convert("RGBA").resize(
+            (TUNESHINE_IMAGE_SIZE, TUNESHINE_IMAGE_SIZE)
+        )
         buf = io.BytesIO()
         img.save(buf, "WEBP")
         return buf.getvalue()
@@ -145,8 +150,6 @@ class TuneshineClient:
         album_name: Optional[str] = None,
         zone_name: Optional[str] = None,
         service_name: str = "Roon",
-        image_width: int = 64,
-        image_height: int = 64,
     ) -> bool:
         """
         Download artwork, convert to WebP, and push binary directly to Tuneshine.
@@ -160,7 +163,7 @@ class TuneshineClient:
         if image_url == self._current_image_url:
             return True  # same track, nothing to do
 
-        webp_bytes = _fetch_as_webp(image_url, image_width, image_height)
+        webp_bytes = _fetch_as_webp(image_url)
 
         metadata: dict = {"serviceName": service_name, "imageUrl": image_url}
         if track_name:
