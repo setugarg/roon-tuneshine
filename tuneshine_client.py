@@ -165,7 +165,11 @@ class TuneshineClient:
 
         webp_bytes = _fetch_as_webp(image_url)
 
-        metadata: dict = {"serviceName": service_name, "imageUrl": image_url}
+        # Don't include imageUrl when sending binary — the device would fetch
+        # from the URL instead of using the binary we just sent.
+        metadata: dict = {"serviceName": service_name}
+        if webp_bytes is None:
+            metadata["imageUrl"] = image_url  # fallback: device fetches it
         if track_name:
             metadata["trackName"] = track_name
         if artist_name:

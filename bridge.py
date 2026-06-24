@@ -19,6 +19,10 @@ from tuneshine_client import TuneshineClient
 
 logger = logging.getLogger(__name__)
 
+# Re-push the current artwork this often so the Tuneshine cloud feed
+# can't reclaim the display between track changes.
+REPUSH_INTERVAL = 30  # seconds
+
 
 class Bridge:
     def __init__(
@@ -39,6 +43,9 @@ class Bridge:
         self._clear_on_stop = clear_on_stop
         self._clear_delay = clear_delay
         self._clear_timer: Optional[threading.Timer] = None
+        self._repush_timer: Optional[threading.Timer] = None
+        self._last_push_kwargs: Optional[dict] = None
+        self._stopped = False
 
     def start(self) -> None:
         self._roon._on_now_playing = self._handle_now_playing  # type: ignore[assignment]
@@ -47,7 +54,9 @@ class Bridge:
         logger.info("Bridge running. Watching Roon for playback…")
 
     def stop(self) -> None:
+        self._stopped = True
         self._cancel_clear_timer()
+        self._cancel_repush_timer()
         self._roon.stop()
 
     # ------------------------------------------------------------------
@@ -76,22 +85,20 @@ class Bridge:
 
         logger.info("Now playing: %s — %s → pushing artwork", track, artist)
 
-        # Run the push in a background thread — downloading + uploading images
-        # can take 1-3s, which would block the Roon websocket callback thread
-        # and cause Roon to drop the connection.
-        threading.Thread(
-            target=self._tuneshine.push_image,
-            kwargs=dict(
-                image_url=url,
-                track_name=track or None,
-                artist_name=artist or None,
-                album_name=album or None,
-                zone_name=zone_name or None,
-            ),
-            daemon=True,
-        ).start()
+        kwargs = dict(
+            image_url=url,
+            track_name=track or None,
+            artist_name=artist or None,
+            album_name=album or None,
+            zone_name=zone_name or None,
+        )
+        self._last_push_kwargs = kwargs
+        self._push_async(kwargs, force=True)
+        self._schedule_repush()
 
     def _handle_stopped(self) -> None:
+        self._cancel_repush_timer()
+        self._last_push_kwargs = None
         if not self._clear_on_stop:
             return
         if self._clear_delay > 0:
@@ -104,7 +111,34 @@ class Bridge:
         logger.info("Playback stopped — clearing Tuneshine display")
         self._tuneshine.clear_image()
 
+    def _push_async(self, kwargs: dict, force: bool = False) -> None:
+        """Push in a background thread. force=True bypasses the URL-dedup cache."""
+        def _run():
+            if force:
+                self._tuneshine._current_image_url = None
+            self._tuneshine.push_image(**kwargs)
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _schedule_repush(self) -> None:
+        self._cancel_repush_timer()
+        if self._stopped:
+            return
+        self._repush_timer = threading.Timer(REPUSH_INTERVAL, self._do_repush)
+        self._repush_timer.daemon = True
+        self._repush_timer.start()
+
+    def _do_repush(self) -> None:
+        if self._last_push_kwargs and not self._stopped:
+            logger.debug("Re-pushing artwork to reclaim display from cloud feed")
+            self._push_async(self._last_push_kwargs, force=True)
+            self._schedule_repush()
+
     def _cancel_clear_timer(self) -> None:
         if self._clear_timer:
             self._clear_timer.cancel()
             self._clear_timer = None
+
+    def _cancel_repush_timer(self) -> None:
+        if self._repush_timer:
+            self._repush_timer.cancel()
+            self._repush_timer = None
